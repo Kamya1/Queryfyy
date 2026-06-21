@@ -1,14 +1,10 @@
 <div align="center">
 
-<<<<<<< HEAD
-Queryfy turns uploaded study material into printable assessments using a Flask backend, Groq question generation, retrieval-aware context selection, duplicate detection, PDF/DOCX export, and optional Google Forms export.
-=======
+
+
 # 🔍 Queryfyy
->>>>>>> b5ce237b5e2d760a09f247c0655939a15e45bafd
 
 ### RAG-Powered AI Assessment Generator
-
-<<<<<<< HEAD
 - Upload PDF, DOCX, PPTX, or TXT files
 - Extract, clean, chunk, embed, and retrieve document context
 - Generate MCQ, True/False, Fill-Ups, Short Answer, Long Answer, and Numerical questions
