@@ -5,7 +5,10 @@ load_dotenv(".env.local", override=True)
 from flask import Flask, request, render_template, send_file, jsonify
 from io import BytesIO
 from PyPDF2 import PdfReader
-from fpdf import FPDF
+
+pdf_string = pdf.output(dest='S').encode('latin1')
+pdf_bytes_data = pdf.output()
+pdf_bytes.write(pdf_bytes_data)
 import unicodedata
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
