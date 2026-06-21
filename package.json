@@ -1,0 +1,9 @@
+{
+  "name": "queryfy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"console.log('Queryfy Flask app: no frontend build required')\"",
+    "start": "python app.py"
+  }
+}

@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: queryfy
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_TEMPERATURE
+        value: "0.7"
+      - key: GROQ_MAX_TOKENS
+        value: "8192"
+      - key: GROQ_TIMEOUT
+        value: "60"
+      - key: SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: QUERYFY_DB_PATH
+        value: queryfy.db
+      - key: DATABASE_URL
+        sync: false
+      - key: RAG_CHUNK_SIZE
+        value: "500"
+      - key: RAG_CHUNK_OVERLAP
+        value: "80"
+      - key: RAG_TOP_K
+        value: "6"

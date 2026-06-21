@@ -1,0 +1,11 @@
+.env
+.env.local
+service-account*.json
+credentials*.json
+__pycache__/
+*.pyc
+temp_*
+venv/
+.DS_Store
+queryfy.db
+vectorstore/chroma/
