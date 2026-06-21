@@ -895,8 +895,10 @@ def generate():
         difficulty = request.form.get('difficulty', 'Medium')
         chunk_size = int(request.form.get('chunk_size', os.getenv("RAG_CHUNK_SIZE", 500)))
         chunk_overlap = int(request.form.get('chunk_overlap', os.getenv("RAG_CHUNK_OVERLAP", 80)))
-        top_k = int(request.form.get('top_k', os.getenv("RAG_TOP_K", 6)))
-
+        top_k = min(
+    int(request.form.get('top_k', os.getenv("RAG_TOP_K", 6))),
+    3
+)
         # Validation
         if num_questions < 1 or num_questions > 50:
             return "Number of questions must be between 1 and 50", 400
