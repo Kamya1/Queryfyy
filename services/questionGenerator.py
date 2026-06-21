@@ -15,7 +15,10 @@ class QuestionGenerator:
         self.llm_client = llm_client
 
     def _build_prompt(self, question_type: str, num_questions: int, difficulty: str, context_chunks: List[str], existing_questions: List[str] = None, attempt: int = 1) -> str:
-        context = "\n\n".join(f"Chunk {i+1}: {chunk}" for i, chunk in enumerate(context_chunks))
+        context = "\n\n".join(
+    f"Chunk {i+1}: {chunk[:500]}"
+    for i, chunk in enumerate(context_chunks[:3])
+)
         existing_questions = existing_questions or []
         avoid_block = "\n".join(f"- {question}" for question in existing_questions[-50:])
         avoid_instruction = f"\nAlready generated questions to avoid:\n{avoid_block}\n" if avoid_block else ""
@@ -161,14 +164,22 @@ Context:
 
             request_count = min(num_questions, max(missing + 3, int(missing * 1.5)))
             attempt_context = self._rotate_context(context_chunks, attempt)
-            prompt = self._build_prompt(
-                question_type,
-                request_count,
-                difficulty,
-                attempt_context,
-                existing_questions=[item.get("question", "") for item in collected],
-                attempt=attempt,
-            )
+
+# Prevent Groq token overflow
+attempt_context = attempt_context[:3]
+attempt_context = [chunk[:500] for chunk in attempt_context]
+
+prompt = self._build_prompt(
+    question_type,
+    request_count,
+    difficulty,
+    attempt_context,
+    existing_questions=[item.get("question", "") for item in collected],
+    attempt=attempt,
+)
+
+print("CHUNKS SENT:", len(attempt_context))
+print("PROMPT LENGTH:", len(prompt))
             response = self.llm_client(prompt)
             if not response:
                 continue
