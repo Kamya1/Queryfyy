@@ -20,6 +20,8 @@ class VectorStore:
         self.documents: List[Dict] = []
         self.chunk_embeddings: List = []
         self.collection = None
+        self.backend = "memory"
+        self.status = "in-memory fallback ready"
         self._init_chroma(collection_name)
 
     def _init_chroma(self, collection_name: str):
@@ -31,8 +33,11 @@ class VectorStore:
             os.makedirs(self.persist_directory, exist_ok=True)
             client = chromadb.PersistentClient(path=self.persist_directory)
             self.collection = client.get_or_create_collection(name=collection_name)
+            self.backend = "chromadb"
+            self.status = f"ChromaDB ready at {self.persist_directory}"
         except Exception as exc:
-            print(f"ChromaDB disabled, using in-memory vector store: {exc}")
+            self.status = f"ChromaDB unavailable, using in-memory vector store: {exc}"
+            print(self.status)
             self.collection = None
 
     @staticmethod

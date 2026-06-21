@@ -1,6 +1,8 @@
+import os
 from dotenv import load_dotenv
-load_dotenv()
-load_dotenv(".env.local", override=True)
+if not os.getenv("VERCEL") and not os.getenv("RENDER"):
+    load_dotenv(override=False)
+    load_dotenv(".env.local", override=False)
 
 from flask import Flask, request, render_template, send_file, jsonify
 from io import BytesIO
@@ -10,15 +12,14 @@ import unicodedata
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import base64
-import os
 import re
 import tempfile
 import time
 import uuid
 from functools import wraps
+from requests import RequestException
 import requests
 from docx import Document
-from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pptx import Presentation
 import json
@@ -70,6 +71,13 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "8192"))
 GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "60"))
+GROQ_MAX_RETRIES = int(os.getenv("GROQ_MAX_RETRIES", "3"))
+STARTUP_CHECKS = {
+    "groq_api_key": "configured" if GROQ_API_KEY else "missing",
+    "google_credentials": "pending",
+    "vector_store": getattr(vector_store, "status", "unknown"),
+    "database": f"sqlite:{db.db_path}",
+}
 
 # Google Form and Drive API scopes
 SCOPES_FORMS = ['https://www.googleapis.com/auth/forms.body']
@@ -105,15 +113,27 @@ try:
         drive_service = build('drive', 'v3', credentials=creds_drive)
         GOOGLE_FORMS_ENABLED = True
         GOOGLE_FORMS_STATUS = f"configured via {google_forms_source}"
+        STARTUP_CHECKS["google_credentials"] = GOOGLE_FORMS_STATUS
     else:
         print(f"Google Forms integration disabled: {google_forms_source}")
         GOOGLE_FORMS_ENABLED = False
         GOOGLE_FORMS_STATUS = google_forms_source
+        STARTUP_CHECKS["google_credentials"] = GOOGLE_FORMS_STATUS
     
 except Exception as e:
     print(f"Google Forms integration disabled: {e}")
     GOOGLE_FORMS_ENABLED = False
     GOOGLE_FORMS_STATUS = str(e)
+    STARTUP_CHECKS["google_credentials"] = GOOGLE_FORMS_STATUS
+
+def log_startup_checks():
+    print(f"Queryfy startup: Groq configured = {bool(GROQ_API_KEY)}")
+    print(f"Queryfy startup: Groq model = {GROQ_MODEL}")
+    print(f"Queryfy startup: Google Forms = {GOOGLE_FORMS_STATUS}")
+    print(f"Queryfy startup: Vector store = {STARTUP_CHECKS['vector_store']}")
+    print(f"Queryfy startup: Database = {STARTUP_CHECKS['database']}")
+
+log_startup_checks()
 
 def validate_email(email):
     """Validate email format"""
@@ -187,37 +207,59 @@ def extract_text_from_file(file_path, filename):
 def generate_with_groq(prompt, query):
     """Generate using Groq API (super fast!)"""
     if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY is missing. Add it to .env.local and restart the Flask server.")
-    
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": GROQ_MODEL,
-                "messages": [
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": query}
-                ],
-                "temperature": GROQ_TEMPERATURE,
-                "max_tokens": GROQ_MAX_TOKENS
-            },
-            timeout=GROQ_TIMEOUT
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            return result['choices'][0]['message']['content']
-        else:
+        raise RuntimeError("Groq is not configured. Set GROQ_API_KEY in Render or Vercel environment variables.")
+
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": query}
+        ],
+        "temperature": GROQ_TEMPERATURE,
+        "max_tokens": GROQ_MAX_TOKENS
+    }
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    last_error = "Groq request failed"
+    for attempt in range(1, GROQ_MAX_RETRIES + 1):
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=GROQ_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                return result['choices'][0]['message']['content']
+
+            if response.status_code in (401, 403):
+                raise RuntimeError("Groq authentication failed. Check GROQ_API_KEY in your deployment environment.")
+
             message = response.text[:500]
-            print(f"Groq API error: {response.status_code} - {message}")
-            raise RuntimeError(f"Groq API error {response.status_code}: {message}")
-    except Exception as e:
-        print(f"Groq API exception: {e}")
-        raise
+            last_error = f"Groq API error {response.status_code}: {message}"
+            print(last_error)
+
+            if response.status_code == 429 or response.status_code >= 500:
+                retry_after = response.headers.get("retry-after")
+                delay = float(retry_after) if retry_after else min(2 ** attempt, 8)
+                time.sleep(delay)
+                continue
+
+            raise RuntimeError(last_error)
+        except RequestException as exc:
+            last_error = f"Could not reach Groq API: {exc}"
+            print(last_error)
+            if attempt < GROQ_MAX_RETRIES:
+                time.sleep(min(2 ** attempt, 8))
+                continue
+            raise RuntimeError("Groq is temporarily unreachable. Please try again in a moment.") from exc
+
+    raise RuntimeError(f"{last_error}. Please try again shortly.")
 
 def llm_generate(prompt):
     """LLM adapter used by the RAG question generator."""
@@ -559,8 +601,8 @@ def save_questions_to_pdf(raw_questions, subject, marks, include_answers=True, g
     pdf.add_page()
     pdf_heading(pdf, "ASSESSMENT PAPER")
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 8, f"Subject: {subject}", ln=True)
-    pdf.cell(0, 8, f"Maximum Marks: {marks}", ln=True)
+    pdf.cell(0, 8, remove_special_characters(f"Subject: {subject}"), ln=True)
+    pdf.cell(0, 8, remove_special_characters(f"Maximum Marks: {marks}"), ln=True)
     pdf.ln(5)
     
     pdf.set_font("Arial", 'I', 10)
@@ -1000,6 +1042,9 @@ def generate():
             
     except ValueError as e:
         return f"Invalid input: {str(e)}", 400
+    except RuntimeError as e:
+        print(f"Runtime error: {str(e)}")
+        return str(e), 503
     except Exception as e:
         print(f"Error: {str(e)}")
         return f"An error occurred: {str(e)}", 500
@@ -1013,10 +1058,12 @@ def health():
         'google_forms_status': GOOGLE_FORMS_STATUS,
         'rag_enabled': True,
         'vector_chunks_loaded': vector_store.count(),
+        'vector_store_backend': getattr(vector_store, "backend", "memory"),
         'apis_configured': {
             'groq': bool(GROQ_API_KEY)
         },
-        'groq_model': GROQ_MODEL
+        'groq_model': GROQ_MODEL,
+        'startup_checks': STARTUP_CHECKS
     })
 
 @app.route('/analytics')
@@ -1031,7 +1078,4 @@ def results():
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    print(f"Queryfy starting with Groq model: {GROQ_MODEL}")
-    print(f"Groq configured: {bool(GROQ_API_KEY)}")
-    print(f"Google Forms: {GOOGLE_FORMS_STATUS}")
     app.run(host='0.0.0.0', port=port, debug=False)
