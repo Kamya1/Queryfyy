@@ -334,7 +334,7 @@
                         await loadAnalyticsDashboard();
                     } else {
                         const text = await readErrorText(response);
-                        showMessage('error', `❌ Error: ${text}`);
+                        showMessage('error', formatErrorMessage(text));
                     }
                 } else {
                     const contentType = response.headers.get('content-type');
@@ -345,15 +345,15 @@
                             await loadQualityReport();
                             await loadAnalyticsDashboard();
                         } else {
-                            showMessage('error', `❌ ${data.message}`);
+                            showMessage('error', formatErrorMessage(data.message));
                         }
                     } else {
                         const text = await readErrorText(response);
-                        showMessage('error', `❌ Error: ${text}`);
+                        showMessage('error', formatErrorMessage(text));
                     }
                 }
             } catch (error) {
-                showMessage('error', `❌ An error occurred: ${error.message}`);
+                showMessage('error', formatErrorMessage(error.message || 'Network request failed. Please check the deployment logs and try again.'));
             } finally {
                 loading.classList.remove('active');
                 submitBtn.disabled = false;
@@ -367,6 +367,14 @@
                 : 'Done.';
             message.innerHTML = String(text || '').trim() || fallback;
             message.style.display = 'block';
+        }
+
+        function formatErrorMessage(text) {
+            const detail = String(text || '').trim();
+            if (!detail) {
+                return 'Error: Request failed. Please check Render/Vercel logs for the backend error.';
+            }
+            return detail.startsWith('Error:') ? detail : `Error: ${detail}`;
         }
 
         async function readErrorText(response) {
@@ -430,3 +438,4 @@
     </script>
 </body>
 </html>
+
