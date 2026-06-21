@@ -7,6 +7,7 @@ if not os.getenv("VERCEL") and not os.getenv("RENDER"):
 from flask import Flask, request, render_template, send_file, jsonify
 from io import BytesIO
 from PyPDF2 import PdfReader
+from fpdf import FPDF
 import unicodedata
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
