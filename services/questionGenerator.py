@@ -147,86 +147,87 @@ Context:
     def _rotate_context(context_chunks: List[str], attempt: int) -> List[str]:
         if not context_chunks:
             return []
+
         offset = (attempt - 1) % len(context_chunks)
         return context_chunks[offset:] + context_chunks[:offset]
 
     def generate(
-    self,
-    context_chunks: List[str],
-    question_type: str,
-    num_questions: int,
-    difficulty: str = "Medium"
-) -> List[Dict]:
+        self,
+        context_chunks: List[str],
+        question_type: str,
+        num_questions: int,
+        difficulty: str = "Medium"
+    ) -> List[Dict]:
 
-    if not context_chunks:
-        return []
+        if not context_chunks:
+            return []
 
-    collected: List[Dict] = []
-    max_attempts = max(4, min(10, num_questions + 2))
+        collected: List[Dict] = []
+        max_attempts = max(4, min(10, num_questions + 2))
 
-    for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, max_attempts + 1):
 
-        missing = num_questions - len(collected)
+            missing = num_questions - len(collected)
 
-        if missing <= 0:
-            break
-
-        request_count = min(
-            num_questions,
-            max(missing + 3, int(missing * 1.5))
-        )
-
-        attempt_context = self._rotate_context(
-            context_chunks,
-            attempt
-        )
-
-        # Prevent Groq token overflow
-        attempt_context = attempt_context[:3]
-        attempt_context = [
-            chunk[:500]
-            for chunk in attempt_context
-        ]
-
-        prompt = self._build_prompt(
-            question_type,
-            request_count,
-            difficulty,
-            attempt_context,
-            existing_questions=[
-                item.get("question", "")
-                for item in collected
-            ],
-            attempt=attempt,
-        )
-
-        print("CHUNKS SENT:", len(attempt_context))
-        print("PROMPT LENGTH:", len(prompt))
-
-        response = self.llm_client(prompt)
-
-        if not response:
-            continue
-
-        parsed = self._parse_response(response)
-
-        scored = self._score_items(
-            parsed,
-            attempt_context,
-            difficulty
-        )
-
-        for item in self._dedupe_questions(scored):
-
-            if len(collected) >= num_questions:
+            if missing <= 0:
                 break
 
-            if self._is_duplicate_against(
-                item.get("question", ""),
-                collected
-            ):
+            request_count = min(
+                num_questions,
+                max(missing + 3, int(missing * 1.5))
+            )
+
+            attempt_context = self._rotate_context(
+                context_chunks,
+                attempt
+            )
+
+            # Prevent Groq token overflow
+            attempt_context = attempt_context[:3]
+            attempt_context = [
+                chunk[:500]
+                for chunk in attempt_context
+            ]
+
+            prompt = self._build_prompt(
+                question_type,
+                request_count,
+                difficulty,
+                attempt_context,
+                existing_questions=[
+                    item.get("question", "")
+                    for item in collected
+                ],
+                attempt=attempt,
+            )
+
+            print("CHUNKS SENT:", len(attempt_context))
+            print("PROMPT LENGTH:", len(prompt))
+
+            response = self.llm_client(prompt)
+
+            if not response:
                 continue
 
-            collected.append(item)
+            parsed = self._parse_response(response)
 
-    return collected[:num_questions]
+            scored = self._score_items(
+                parsed,
+                attempt_context,
+                difficulty
+            )
+
+            for item in self._dedupe_questions(scored):
+
+                if len(collected) >= num_questions:
+                    break
+
+                if self._is_duplicate_against(
+                    item.get("question", ""),
+                    collected
+                ):
+                    continue
+
+                collected.append(item)
+
+        return collected[:num_questions]
