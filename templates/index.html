@@ -333,7 +333,7 @@
                         await loadQualityReport();
                         await loadAnalyticsDashboard();
                     } else {
-                        const text = await response.text();
+                        const text = await readErrorText(response);
                         showMessage('error', `❌ Error: ${text}`);
                     }
                 } else {
@@ -348,7 +348,7 @@
                             showMessage('error', `❌ ${data.message}`);
                         }
                     } else {
-                        const text = await response.text();
+                        const text = await readErrorText(response);
                         showMessage('error', `❌ Error: ${text}`);
                     }
                 }
@@ -362,8 +362,26 @@
 
         function showMessage(type, text) {
             message.className = `message ${type}`;
-            message.innerHTML = text;
+            const fallback = type === 'error'
+                ? 'Error: Request failed. Please check Render/Vercel logs for the backend error.'
+                : 'Done.';
+            message.innerHTML = String(text || '').trim() || fallback;
             message.style.display = 'block';
+        }
+
+        async function readErrorText(response) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                try {
+                    const data = await response.json();
+                    return data.message || data.error || JSON.stringify(data);
+                } catch (error) {
+                    return `Request failed with status ${response.status} ${response.statusText || ''}. The server returned invalid JSON.`;
+                }
+            }
+            const text = (await response.text()).trim();
+            if (text) return text;
+            return `Request failed with status ${response.status} ${response.statusText || ''}. Check deployment logs for details.`;
         }
 
         async function loadQualityReport() {

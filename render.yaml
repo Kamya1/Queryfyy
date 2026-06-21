@@ -5,6 +5,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
+      - key: RENDER
+        value: "1"
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
@@ -12,11 +14,15 @@ services:
       - key: GROQ_TEMPERATURE
         value: "0.7"
       - key: GROQ_MAX_TOKENS
-        value: "8192"
+        value: "2500"
       - key: GROQ_TIMEOUT
-        value: "60"
+        value: "30"
       - key: GROQ_MAX_RETRIES
-        value: "3"
+        value: "1"
+      - key: QUESTION_MAX_ATTEMPTS
+        value: "2"
+      - key: HOSTED_MAX_QUESTIONS
+        value: "5"
       - key: SERVICE_ACCOUNT_JSON
         sync: false
       - key: QUERYFY_DB_PATH

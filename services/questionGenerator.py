@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Dict, List, Optional
 
@@ -163,7 +164,9 @@ Context:
             return []
 
         collected: List[Dict] = []
-        max_attempts = max(4, min(10, num_questions + 2))
+        hosted_runtime = bool(os.getenv("VERCEL") or os.getenv("RENDER"))
+        default_attempts = "2" if hosted_runtime else str(max(4, min(10, num_questions + 2)))
+        max_attempts = int(os.getenv("QUESTION_MAX_ATTEMPTS", default_attempts))
 
         for attempt in range(1, max_attempts + 1):
 

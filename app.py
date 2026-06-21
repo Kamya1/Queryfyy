@@ -7,7 +7,6 @@ if not os.getenv("VERCEL") and not os.getenv("RENDER"):
 from flask import Flask, request, render_template, send_file, jsonify
 from io import BytesIO
 from PyPDF2 import PdfReader
-from fpdf import FPDF
 import unicodedata
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -21,6 +20,7 @@ from requests import RequestException
 import requests
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from fpdf import FPDF
 from pptx import Presentation
 import json
 
@@ -66,12 +66,13 @@ def rate_limit(f):
     return decorated_function
 
 # Configure AI API
+HOSTED_RUNTIME = bool(os.getenv("VERCEL") or os.getenv("RENDER"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
-GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "8192"))
-GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "60"))
-GROQ_MAX_RETRIES = int(os.getenv("GROQ_MAX_RETRIES", "3"))
+GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "2500" if HOSTED_RUNTIME else "8192"))
+GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "30" if HOSTED_RUNTIME else "60"))
+GROQ_MAX_RETRIES = int(os.getenv("GROQ_MAX_RETRIES", "1" if HOSTED_RUNTIME else "3"))
 STARTUP_CHECKS = {
     "groq_api_key": "configured" if GROQ_API_KEY else "missing",
     "google_credentials": "pending",
@@ -585,11 +586,24 @@ def pdf_heading(pdf, title):
     pdf.cell(0, 10, title, ln=True, align="C")
     pdf.ln(6)
 
+def pdf_page_width(pdf):
+    return pdf.w - pdf.l_margin - pdf.r_margin
+
+def pdf_multicell(pdf, text, height=6, x=None, width=None):
+    if x is None:
+        x = pdf.l_margin
+    if width is None:
+        width = pdf.w - x - pdf.r_margin
+    pdf.set_x(x)
+    pdf.multi_cell(width, height, remove_special_characters(str(text)))
+    pdf.set_x(pdf.l_margin)
+
 def pdf_label_value(pdf, label, value):
     pdf.set_font("Arial", 'B', 11)
+    pdf.set_x(pdf.l_margin)
     pdf.cell(48, 7, remove_special_characters(label), border=0)
     pdf.set_font("Arial", size=11)
-    pdf.multi_cell(0, 7, remove_special_characters(str(value)))
+    pdf_multicell(pdf, value, height=7, x=pdf.l_margin + 48, width=pdf_page_width(pdf) - 48)
 
 def save_questions_to_pdf(raw_questions, subject, marks, include_answers=True, generated_items=None):
     """Save a clean printable PDF with summary and optional teacher sheet."""
@@ -606,20 +620,21 @@ def save_questions_to_pdf(raw_questions, subject, marks, include_answers=True, g
     pdf.ln(5)
     
     pdf.set_font("Arial", 'I', 10)
-    pdf.multi_cell(0, 6, "Instructions: Read all questions carefully. Write your answers clearly.")
+    pdf_multicell(pdf, "Instructions: Read all questions carefully. Write your answers clearly.")
     pdf.ln(5)
     
     pdf.set_draw_color(200, 200, 200)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.set_x(pdf.l_margin)
     pdf.ln(5)
 
     pdf.set_font("Arial", size=11)
     for index, item in enumerate(export_questions, 1):
         pdf.set_font("Arial", 'B', 11)
-        pdf.multi_cell(0, 6, remove_special_characters(f"{index}. {item['question']}"))
+        pdf_multicell(pdf, f"{index}. {item['question']}")
         pdf.set_font("Arial", size=11)
         for option_index, option in enumerate(item.get("options") or []):
-            pdf.multi_cell(0, 6, remove_special_characters(f"   {chr(97 + option_index)}) {option}"))
+            pdf_multicell(pdf, f"   {chr(97 + option_index)}) {option}")
         pdf.ln(3)
 
     if include_answers:
@@ -627,7 +642,7 @@ def save_questions_to_pdf(raw_questions, subject, marks, include_answers=True, g
         pdf_heading(pdf, "Teacher Answer Sheet")
         for index, item in enumerate(export_questions, 1):
             pdf.set_font("Arial", 'B', 11)
-            pdf.multi_cell(0, 6, remove_special_characters(f"{index}. {item['question']}"))
+            pdf_multicell(pdf, f"{index}. {item['question']}")
             pdf.set_font("Arial", size=10)
             pdf_label_value(pdf, "Correct Answer:", item.get("answer") or "Not provided")
             pdf_label_value(pdf, "Explanation:", item.get("explanation") or "Not provided")
@@ -646,8 +661,10 @@ def save_questions_to_pdf(raw_questions, subject, marks, include_answers=True, g
     pdf_label_value(pdf, "Topic Coverage Summary:", summary["topic_coverage_summary"])
 
     pdf_bytes = BytesIO()
-    pdf_string = pdf.output(dest='S').encode('latin1')
-    pdf_bytes.write(pdf_string)
+    pdf_output = pdf.output(dest='S')
+    if isinstance(pdf_output, str):
+        pdf_output = pdf_output.encode('latin1')
+    pdf_bytes.write(bytes(pdf_output))
     pdf_bytes.seek(0)
     return pdf_bytes
 
@@ -869,22 +886,32 @@ def add_question_to_form(service, form_id, question_text, question_type="text", 
 
 @app.route('/')
 def index():
-    return render_template('index.html', google_forms_enabled=GOOGLE_FORMS_ENABLED)
+    response = app.make_response(render_template('index.html', google_forms_enabled=GOOGLE_FORMS_ENABLED))
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 @app.route('/generate', methods=['POST'])
 @rate_limit
 def generate():
+    def error_response(message, status=500, **extra):
+        return jsonify({
+            "success": False,
+            "message": message,
+            "status": status,
+            **extra,
+        }), status
+
     try:
         uploaded_file = request.files.get('pdf_file')
         if not uploaded_file or uploaded_file.filename == '':
-            return "No file uploaded", 400
+            return error_response("No file uploaded", 400)
 
         filename = uploaded_file.filename
         ext = filename.lower().split('.')[-1]
         
         # NEW: Check for supported file types
         if ext not in ['pdf', 'docx', 'pptx', 'txt']:
-            return "Unsupported file format. Please upload PDF, DOCX, PPTX, or TXT files.", 400
+            return error_response("Unsupported file format. Please upload PDF, DOCX, PPTX, or TXT files.", 400)
 
         question_type = request.form.get('question_type', 'mcq')
         num_questions = int(request.form.get('num_questions', 10))
@@ -900,17 +927,20 @@ def generate():
     int(request.form.get('top_k', os.getenv("RAG_TOP_K", 6))),
     3
 )
+        if HOSTED_RUNTIME:
+            num_questions = min(num_questions, int(os.getenv("HOSTED_MAX_QUESTIONS", "5")))
+
         # Validation
         if num_questions < 1 or num_questions > 50:
-            return "Number of questions must be between 1 and 50", 400
+            return error_response("Number of questions must be between 1 and 50", 400)
 
         if output_format == 'form':
             if not GOOGLE_FORMS_ENABLED:
-                return "Google Forms integration is not configured", 400
+                return error_response("Google Forms integration is not configured", 400)
             if not user_email:
-                return "Email address is required for Google Form", 400
+                return error_response("Email address is required for Google Form", 400)
             if not validate_email(user_email):
-                return "Invalid email format", 400
+                return error_response("Invalid email format", 400)
 
         # Save upload to the platform temp directory for serverless compatibility.
         temp_path = os.path.join(tempfile.gettempdir(), f"queryfy_{uuid.uuid4().hex}_{os.path.basename(filename)}")
@@ -921,7 +951,7 @@ def generate():
             file_text = extract_text_from_file(temp_path, filename)
             
             if len(file_text.strip()) < 100:
-                return "File content too short or unreadable. Please upload a file with at least 100 characters of text content.", 400
+                return error_response("File content too short or unreadable. Please upload a file with at least 100 characters of text content.", 400)
 
             doc_id, chunks, retrieved_chunks, context_chunks = build_rag_pipeline(
                 file_text=file_text,
@@ -961,11 +991,10 @@ def generate():
                 difficulty=difficulty,
             )
 
-            if len(structured_questions) != num_questions:
-                return (
-                    f"Unable to generate exactly {num_questions} unique questions. "
-                    f"Generated {len(structured_questions)} after regeneration attempts. "
-                    "Please try a document with more content or reduce the requested count.",
+            generated_count = len(structured_questions)
+            if generated_count == 0:
+                return error_response(
+                    "Unable to generate questions from this document. Please try a document with more content or reduce the requested count.",
                     500,
                 )
 
@@ -1002,8 +1031,8 @@ def generate():
 
             if output_format == 'pdf':
                 export_count = len(parse_questions_for_export(questions, structured_questions))
-                if export_count != num_questions:
-                    return f"PDF validation failed: requested {num_questions}, prepared {export_count} questions.", 500
+                if export_count != generated_count:
+                    return error_response(f"PDF validation failed: generated {generated_count}, prepared {export_count} questions.", 500)
                 pdf_output = save_questions_to_pdf(
                     questions,
                     subject,
@@ -1017,8 +1046,8 @@ def generate():
             # NEW: Word document output
             elif output_format == 'docx':
                 export_count = len(parse_questions_for_export(questions, structured_questions))
-                if export_count != num_questions:
-                    return f"DOCX validation failed: requested {num_questions}, prepared {export_count} questions.", 500
+                if export_count != generated_count:
+                    return error_response(f"DOCX validation failed: generated {generated_count}, prepared {export_count} questions.", 500)
                 docx_output = save_questions_to_docx(questions, subject, marks, include_answers)
                 fname = f'{subject}_Assessment_with_Answers.docx' if include_answers else f'{subject}_Assessment.docx'
                 return send_file(docx_output, download_name=fname, as_attachment=True, 
@@ -1027,8 +1056,8 @@ def generate():
             elif output_format == 'form':
                 try:
                     export_count = len(parse_questions_for_export(questions, structured_questions))
-                    if export_count != num_questions:
-                        return jsonify({'success': False, 'message': f'Google Form validation failed: requested {num_questions}, prepared {export_count} questions.'}), 500
+                    if export_count != generated_count:
+                        return jsonify({'success': False, 'message': f'Google Form validation failed: generated {generated_count}, prepared {export_count} questions.'}), 500
                     form_url = create_google_form(questions, user_email)
                     return jsonify({'success': True, 'form_url': form_url, 'message': 'Form created successfully!'})
                 except Exception as e:
@@ -1036,20 +1065,20 @@ def generate():
                     return jsonify({'success': False, 'message': f'Google Form error: {str(e)}'}), 500
             
             else:
-                return "Invalid output format", 400
+                return error_response("Invalid output format", 400)
         
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             
     except ValueError as e:
-        return f"Invalid input: {str(e)}", 400
+        return error_response(f"Invalid input: {str(e)}", 400)
     except RuntimeError as e:
         print(f"Runtime error: {str(e)}")
-        return str(e), 503
+        return error_response(str(e), 503)
     except Exception as e:
         print(f"Error: {str(e)}")
-        return f"An error occurred: {str(e)}", 500
+        return error_response(f"An error occurred: {str(e)}", 500)
 
 @app.route('/health')
 def health():
