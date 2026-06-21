@@ -15,7 +15,7 @@ Queryfy transforms study material into professional assessments. The existing up
 - Generate correct answers, explanations, and source chunk references
 - Detect near-duplicate questions with embedding similarity
 - Calculate relevance, context coverage, difficulty, and confidence scores
-- Export as PDF, DOCX, or Google Form
+- Export as PDF and DOCX
 - Store documents, generated questions, metadata, and analytics in PostgreSQL/Supabase with SQLite fallback
 - Expose analytics through `/analytics` and latest quality scores through `/results`
 
