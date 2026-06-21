@@ -150,7 +150,14 @@ Context:
         offset = (attempt - 1) % len(context_chunks)
         return context_chunks[offset:] + context_chunks[:offset]
 
-    def generate(self, context_chunks: List[str], question_type: str, num_questions: int, difficulty: str = "Medium") -> List[Dict]:
+    def generate(
+    self,
+    context_chunks: List[str],
+    question_type: str,
+    num_questions: int,
+    difficulty: str = "Medium"
+) -> List[Dict]:
+
     if not context_chunks:
         return []
 
@@ -158,6 +165,7 @@ Context:
     max_attempts = max(4, min(10, num_questions + 2))
 
     for attempt in range(1, max_attempts + 1):
+
         missing = num_questions - len(collected)
 
         if missing <= 0:
@@ -168,11 +176,17 @@ Context:
             max(missing + 3, int(missing * 1.5))
         )
 
-        attempt_context = self._rotate_context(context_chunks, attempt)
+        attempt_context = self._rotate_context(
+            context_chunks,
+            attempt
+        )
 
         # Prevent Groq token overflow
         attempt_context = attempt_context[:3]
-        attempt_context = [chunk[:500] for chunk in attempt_context]
+        attempt_context = [
+            chunk[:500]
+            for chunk in attempt_context
+        ]
 
         prompt = self._build_prompt(
             question_type,
@@ -195,6 +209,7 @@ Context:
             continue
 
         parsed = self._parse_response(response)
+
         scored = self._score_items(
             parsed,
             attempt_context,
