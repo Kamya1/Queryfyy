@@ -254,11 +254,6 @@ Vercel is supported via `vercel.json` and `api/index.py`.
 | **Frontend** | HTML, CSS, JavaScript (served via Jinja2 templates) |
 | **Deployment** | Render, Vercel |
 
----
-
-## 📊 Resume Highlight
-
-> Built a **Retrieval-Augmented Generation (RAG)** platform for automated assessment creation — featuring semantic document chunking, vector embeddings, context-aware LLM prompting, Bloom's Taxonomy difficulty classification, duplicate question detection, and multi-format export (PDF, DOCX, Google Forms). Deployed on both Render and Vercel with PostgreSQL/Supabase persistence.
 
 ---
 
