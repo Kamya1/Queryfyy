@@ -68,7 +68,7 @@ def rate_limit(f):
 # Configure AI API
 HOSTED_RUNTIME = bool(os.getenv("VERCEL") or os.getenv("RENDER"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "2500" if HOSTED_RUNTIME else "8192"))
 GROQ_TIMEOUT = int(os.getenv("GROQ_TIMEOUT", "30" if HOSTED_RUNTIME else "60"))
@@ -245,11 +245,14 @@ def generate_with_groq(prompt, query):
             last_error = f"Groq API error {response.status_code}: {message}"
             print(last_error)
 
-            if response.status_code == 429 or response.status_code >= 500:
-                retry_after = response.headers.get("retry-after")
-                delay = float(retry_after) if retry_after else min(2 ** attempt, 8)
-                time.sleep(delay)
-                continue
+            if response.status_code == 429:
+                raise RuntimeError("Groq quota exceeded. Please try again later.")
+
+            if response.status_code >= 500:
+               retry_after = response.headers.get("retry-after")
+               delay = float(retry_after) if retry_after else min(2 ** attempt, 8)
+               time.sleep(delay)
+               continue
 
             raise RuntimeError(last_error)
         except RequestException as exc:
@@ -924,8 +927,8 @@ def generate():
         chunk_size = int(request.form.get('chunk_size', os.getenv("RAG_CHUNK_SIZE", 500)))
         chunk_overlap = int(request.form.get('chunk_overlap', os.getenv("RAG_CHUNK_OVERLAP", 80)))
         top_k = min(
-    int(request.form.get('top_k', os.getenv("RAG_TOP_K", 6))),
-    3
+    int(request.form.get('top_k', os.getenv("RAG_TOP_K", 2))),
+    2
 )
         if HOSTED_RUNTIME:
             num_questions = min(num_questions, int(os.getenv("HOSTED_MAX_QUESTIONS", "5")))
